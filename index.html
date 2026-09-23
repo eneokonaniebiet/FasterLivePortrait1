@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>FasterLivePortrait</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-slate-950 text-white">
+  <main class="mx-auto max-w-6xl p-4 md:p-8">
+    <header class="mb-6 flex flex-col gap-2">
+      <h1 class="text-3xl font-bold">FasterLivePortrait Live Studio</h1>
+      <p class="text-slate-400">Upload a portrait, then drive it with your camera.</p>
+    </header>
+
+    <section class="grid gap-6 lg:grid-cols-2">
+      <div class="rounded-2xl border border-slate-800 bg-slate-900 p-4 shadow-xl">
+        <label class="mb-2 block text-sm font-medium text-slate-300">Source portrait</label>
+        <input id="source" type="file" accept="image/*"
+          class="w-full rounded-xl bg-slate-800 p-3 text-sm">
+        <button id="start" disabled
+          class="mt-4 w-full rounded-xl bg-indigo-500 px-4 py-3 font-semibold transition hover:bg-indigo-400 disabled:cursor-not-allowed disabled:opacity-40">
+          Start Live Camera
+        </button>
+        <button id="stop"
+          class="mt-2 hidden w-full rounded-xl bg-rose-500 px-4 py-3 font-semibold hover:bg-rose-400">
+          Stop
+        </button>
+        <p id="status" class="mt-4 text-sm text-slate-400">Select a portrait.</p>
+        <video id="camera" autoplay playsinline muted class="mt-4 hidden w-full rounded-xl"></video>
+      </div>
+
+      <div class="rounded-2xl border border-slate-800 bg-slate-900 p-4 shadow-xl">
+        <div class="mb-2 flex items-center justify-between">
+          <span class="text-sm font-medium text-slate-300">Live result</span>
+          <span id="fps" class="text-xs text-emerald-400">0 FPS</span>
+        </div>
+        <canvas id="output" class="aspect-video w-full rounded-xl bg-black"></canvas>
+      </div>
+    </section>
+  </main>
+
+<script>
+const sourceInput = document.getElementById("source");
+const startBtn = document.getElementById("start");
+const stopBtn = document.getElementById("stop");
+const statusEl = document.getElementById("status");
+const video = document.getElementById("camera");
+const canvas = document.getElementById("output");
+const ctx = canvas.getContext("2d", { alpha: false });
+const fpsEl = document.getElementById("fps");
+
+let sessionId = null;
+let socket = null;
+let stream = null;
+let timer = null;
+let sending = false;
+let frameCount = 0;
+let fpsStart = performance.now();
+
+function setStatus(s) { statusEl.textContent = s; }
+
+sourceInput.addEventListener("change", async () => {
+  const file = sourceInput.files[0];
+  if (!file) return;
+  setStatus("Uploading and preparing portrait…");
+  const fd = new FormData();
+  fd.append("file", file);
+
+  try {
+    const r = await fetch("/api/source", { method: "POST", body: fd });
+    const body = await r.json();
+    if (!r.ok) throw new Error(body.detail || "Upload failed");
+    sessionId = body.session_id;
+    startBtn.disabled = false;
+    setStatus("Portrait ready.");
+  } catch (e) {
+    setStatus(e.message);
+  }
+});
+
+async function start() {
+  if (!sessionId) return;
+  stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30, max: 30 } },
+    audio: false
+  });
+  video.srcObject = stream;
+  video.classList.remove("hidden");
+
+  const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+  socket = new WebSocket(`${protocol}//${location.host}/api/stream-live?session_id=${encodeURIComponent(sessionId)}`);
+  socket.binaryType = "blob";
+
+  socket.onopen = () => {
+    setStatus("Live stream connected.");
+    startBtn.classList.add("hidden");
+    stopBtn.classList.remove("hidden");
+    timer = setInterval(captureFrame, 33);
+  };
+
+  socket.onmessage = async (event) => {
+    if (typeof event.data === "string") {
+      const msg = JSON.parse(event.data);
+      if (msg.type === "stats") {
+        fpsEl.textContent = `${msg.fps} FPS`;
+      } else if (msg.type === "error") {
+        setStatus(msg.message);
+      }
+      return;
+    }
+    const blob = event.data instanceof Blob ? event.data : new Blob([event.data], { type: "image/jpeg" });
+    const bitmap = await createImageBitmap(blob);
+    if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+    }
+    ctx.drawImage(bitmap, 0, 0);
+    bitmap.close();
+
+    frameCount++;
+    const now = performance.now();
+    if (now - fpsStart > 1000) {
+      fpsEl.textContent = `${frameCount} FPS`;
+      frameCount = 0;
+      fpsStart = now;
+    }
+    sending = false;
+  };
+
+  socket.onerror = () => setStatus("WebSocket error.");
+  socket.onclose = () => stop();
+}
+
+function captureFrame() {
+  if (!socket || socket.readyState !== WebSocket.OPEN || sending || video.readyState < 2) return;
+  sending = true;
+
+  const maxW = 640;
+  const scale = Math.min(1, maxW / video.videoWidth);
+  const w = Math.max(1, Math.round(video.videoWidth * scale));
+  const h = Math.max(1, Math.round(video.videoHeight * scale));
+
+  const off = document.createElement("canvas");
+  off.width = w; off.height = h;
+  off.getContext("2d", { alpha: false }).drawImage(video, 0, 0, w, h);
+  off.toBlob(blob => {
+    if (blob && socket.readyState === WebSocket.OPEN) socket.send(blob);
+    else sending = false;
+  }, "image/jpeg", 0.78);
+}
+
+function stop() {
+  if (timer) clearInterval(timer);
+  timer = null;
+  sending = false;
+  if (socket) {
+    socket.onclose = null;
+    socket.close();
+    socket = null;
+  }
+  if (stream) {
+    stream.getTracks().forEach(t => t.stop());
+    stream = null;
+  }
+  video.classList.add("hidden");
+  startBtn.classList.remove("hidden");
+  stopBtn.classList.add("hidden");
+  setStatus("Stopped.");
+}
+
+startBtn.addEventListener("click", start);
+stopBtn.addEventListener("click", stop);
+window.addEventListener("beforeunload", stop);
+</script>
+</body>
+</html>
