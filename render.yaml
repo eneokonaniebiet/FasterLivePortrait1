@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: faster-liveportrait
+    runtime: docker
+    plan: 2c-8g
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    maxShutdownDelaySeconds: 120
+    autoDeployTrigger: commit
+    envVars:
+      - key: PORT
+        value: "10000"
+      - key: HOST
+        value: "0.0.0.0"
+      - key: LOG_LEVEL
+        value: "INFO"
+      - key: FLIP_CONFIG
+        value: "configs/trt_infer.yaml"
+      - key: FLIP_CHECKPOINT_DIR
+        value: "/data/checkpoints"
+      - key: TARGET_FPS
+        value: "30"
+      - key: MAX_UPLOAD_MB
+        value: "20"
+      - key: MAX_FRAME_BYTES
+        value: "500000"
+      - key: CORS_ORIGINS
+        value: "*"
