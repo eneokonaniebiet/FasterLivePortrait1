@@ -15,5 +15,8 @@ jobs:
         with:
           token: ${{ secrets.REPLICATE_CLI_AUTH_TOKEN }}
 
+      - name: Use Replicate Cog config
+        run: cp replicate/cog.yaml cog.yaml
+
       - name: Push model
-        run: cog push -f replicate/cog.yaml r8.im/eneokonaniebiet/fasterliveportrait1
+        run: cog push r8.im/eneokonaniebiet/fasterliveportrait1
