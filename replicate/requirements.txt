@@ -1,0 +1,17 @@
+cog>=0.18.0
+omegaconf
+numpy==1.26.4
+opencv-python-headless
+onnx
+pycuda
+insightface
+huggingface_hub[cli]
+mediapipe==0.10.13
+torchgeometry
+soundfile
+munch
+phonemizer
+kokoro>=0.3.4
+misaki[ja]
+misaki[zh]
+tensorrt==8.6.1
