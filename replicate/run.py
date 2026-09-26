@@ -57,8 +57,23 @@ class Runner(BasePredictor):
             cmake_file.write_text(text)
             build = plugin_root / "build"
             build.mkdir(exist_ok=True)
+
+            header = subprocess.check_output(
+                ["bash", "-lc", "find /usr/local /opt -name NvInfer.h -print -quit"],
+                text=True,
+            ).strip()
+            if not header:
+                raise RuntimeError("TensorRT headers were not found in the Replicate image")
+            trt_root = SysPath(header).parents[1]
+            if not (trt_root / "lib" / "libnvinfer.so").exists():
+                lib = subprocess.check_output(
+                    ["bash", "-lc", "find /usr/local /opt -name libnvinfer.so -print -quit"],
+                    text=True,
+                ).strip()
+                if lib:
+                    trt_root = SysPath(lib).parents[1]
             subprocess.run([
-                "cmake", "..", "-DTensorRT_ROOT=/usr/local/tensorrt"
+                "cmake", "..", f"-DTensorRT_ROOT={trt_root}"
             ], cwd=build, check=True)
             subprocess.run(["make", "-j2"], cwd=build, check=True)
             shutil.copy2(build / "libgrid_sample_3d_plugin.so", PLUGIN)
