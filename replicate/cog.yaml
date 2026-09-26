@@ -1,4 +1,5 @@
 build:
+  sdk_version: "0.18.0"
   gpu: true
   cuda: "12.1"
   python_version: "3.10"
