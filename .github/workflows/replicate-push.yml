@@ -1,0 +1,22 @@
+name: Push FasterLivePortrait to Replicate
+
+on:
+  workflow_dispatch:
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Cog
+        uses: replicate/setup-cog@v2
+        with:
+          token: ${{ secrets.REPLICATE_CLI_AUTH_TOKEN }}
+
+      - name: Use Replicate Cog config
+        run: cp replicate/cog.yaml cog.yaml
+
+      - name: Push model
+        run: cog push r8.im/eneokonaniebiet/fasterliveportrait1
