@@ -11,4 +11,4 @@ build:
     - build-essential
     - libgl1
     - libglib2.0-0
-run: "replicate/run.py:Runner"
+predict: "replicate/run.py:Runner"
