@@ -1,0 +1,13 @@
+build:
+  gpu: true
+  cuda: "12.1"
+  python_version: "3.10"
+  python_requirements: replicate/requirements.txt
+  system_packages:
+    - ffmpeg
+    - git
+    - cmake
+    - build-essential
+    - libgl1
+    - libglib2.0-0
+run: "replicate/run.py:Runner"
