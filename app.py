@@ -251,3 +251,9 @@ async def delete_source(session_id: str):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("app:app", host=HOST, port=PORT, workers=1)
+
+
+# Optional Replicate-hosted FasterLivePortrait animation endpoints.
+from replicate_api import router as replicate_router
+
+app.include_router(replicate_router)
