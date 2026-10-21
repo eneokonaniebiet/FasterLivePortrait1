@@ -7,6 +7,7 @@ from typing import Any
 
 import httpx
 from fastapi import FastAPI, File, Header, HTTPException, UploadFile
+from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 REPLICATE_API = "https://api.replicate.com/v1"
@@ -60,6 +61,50 @@ async def upload_to_replicate(client: httpx.AsyncClient, token: str, file: Uploa
     if not url:
         raise HTTPException(status_code=502, detail="Replicate did not return a file URL")
     return str(url)
+
+
+
+@app.get("/", response_class=HTMLResponse)
+async def home() -> str:
+    return """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FasterLivePortrait • Replicate test</title>
+<style>
+body{margin:0;background:#10131b;color:#f4f6fb;font:16px system-ui,sans-serif;padding:22px}
+main{max-width:640px;margin:auto}h1{font-size:1.7rem}p{color:#b8c0d4;line-height:1.5}
+form{background:#1b2130;border:1px solid #343d52;border-radius:16px;padding:18px}
+label{display:block;margin:15px 0 7px;font-weight:650}input,button{width:100%;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid #48536b;background:#111722;color:#fff}
+button{margin-top:18px;background:#72f0bd;color:#07130e;font-weight:800;border:0}
+#result{white-space:pre-wrap;overflow-wrap:anywhere;background:#0a0d13;border-radius:12px;padding:14px;margin-top:18px}
+small{color:#b8c0d4}a{color:#72f0bd}
+</style></head><body><main>
+<h1>FasterLivePortrait · Replicate test</h1>
+<p>This page sends a portrait image and a driving video to your configured Replicate model. It is an animation job, not a continuous live-camera stream.</p>
+<form id="job">
+<label for="key">Kémzy access key</label><input id="key" type="password" autocomplete="off" required>
+<small>Use the value you saved as KEMZY_REPLICATE_ACCESS_KEY in Render. Never enter your Replicate API token here.</small>
+<label for="image">Portrait image</label><input id="image" type="file" accept="image/*" required>
+<label for="video">Driving video</label><input id="video" type="file" accept="video/*" required>
+<label for="fps">Output FPS (1–60)</label><input id="fps" type="number" min="1" max="60" value="30" required>
+<label for="multiplier">Driving multiplier (0.1–3)</label><input id="multiplier" type="number" min="0.1" max="3" step="0.1" value="1" required>
+<button id="submit" type="submit">Generate animation</button>
+</form><div id="result" aria-live="polite">Ready. Your request may use your Replicate credit.</div>
+<script>
+const form=document.getElementById('job'),result=document.getElementById('result'),button=document.getElementById('submit');
+form.addEventListener('submit',async e=>{
+e.preventDefault();button.disabled=true;result.textContent='Uploading files and submitting prediction…';
+try{
+const data=new FormData();data.append('source_image',document.getElementById('image').files[0]);data.append('driving_video',document.getElementById('video').files[0]);data.append('fps',document.getElementById('fps').value);data.append('driving_multiplier',document.getElementById('multiplier').value);
+const key=document.getElementById('key').value;
+let r=await fetch('/api/replicate/animate',{method:'POST',headers:{'X-Kemzy-Access-Key':key},body:data});let j=await r.json();
+if(!r.ok)throw new Error(j.detail||('Request failed: '+r.status));
+result.textContent=JSON.stringify(j,null,2);
+if(j.prediction_id && !['succeeded','failed','canceled'].includes(j.status)){
+for(let i=0;i<20;i++){await new Promise(resolve=>setTimeout(resolve,4000));r=await fetch('/api/replicate/predictions/'+encodeURIComponent(j.prediction_id),{headers:{'X-Kemzy-Access-Key':key}});j=await r.json();if(!r.ok)throw new Error(j.detail||('Status check failed: '+r.status));result.textContent=JSON.stringify(j,null,2);if(['succeeded','failed','canceled'].includes(j.status))break;}
+}
+}catch(err){result.textContent='Error: '+err.message;}finally{button.disabled=false;}
+});
+</script></main></body></html>"""
 
 
 @app.get("/health")
