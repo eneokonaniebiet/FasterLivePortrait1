@@ -16,3 +16,4 @@ phonemizer
 kokoro>=0.3.4
 misaki[ja]
 misaki[zh]
+httpx>=0.27,<1.0
