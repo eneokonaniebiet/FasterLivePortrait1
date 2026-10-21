@@ -1,0 +1,13 @@
+build:
+  gpu: true
+  cuda: "11.8"
+  python_version: "3.10"
+  python_requirements: replicate/requirements.txt
+  system_packages:
+    - "ffmpeg"
+    - "libgl1"
+    - "libglib2.0-0"
+    - "libsm6"
+    - "libxext6"
+    - "libxrender1"
+run: "replicate/predict.py:Runner"
