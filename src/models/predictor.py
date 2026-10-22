@@ -182,12 +182,21 @@ class OnnxRuntimePredictor:
         self.debug = kwargs.get("debug", False)
         providers = ['CUDAExecutionProvider', 'CoreMLExecutionProvider', 'CPUExecutionProvider']
 
-        print(f"OnnxRuntime use {providers}")
+        available_providers = onnxruntime.get_available_providers()
+        print(f"[FasterLivePortrait runtime] ONNX Runtime version: {onnxruntime.__version__}", flush=True)
+        print(f"[FasterLivePortrait runtime] Available ONNX providers: {available_providers}", flush=True)
+        print(f"[FasterLivePortrait runtime] Requested ONNX providers (priority order): {providers}", flush=True)
+        if 'CUDAExecutionProvider' not in available_providers:
+            print("[FasterLivePortrait runtime] WARNING: CUDAExecutionProvider is not available; ONNX model operations will run on a supported fallback provider.", flush=True)
         opts = onnxruntime.SessionOptions()
         # opts.inter_op_num_threads = kwargs.get("num_threads", 4)
         # opts.intra_op_num_threads = kwargs.get("num_threads", 4)
         # opts.log_severity_level = 3
         self.onnx_model = onnxruntime.InferenceSession(model_path, providers=providers, sess_options=opts)
+        actual_providers = self.onnx_model.get_providers()
+        print(f"[FasterLivePortrait runtime] Model {os.path.basename(model_path)} active providers: {actual_providers}", flush=True)
+        if 'CUDAExecutionProvider' not in actual_providers:
+            print(f"[FasterLivePortrait runtime] WARNING: {os.path.basename(model_path)} is not using CUDA; this model may run slowly on CPU.", flush=True)
         self.inputs = self.onnx_model.get_inputs()
         self.outputs = self.onnx_model.get_outputs()
 
