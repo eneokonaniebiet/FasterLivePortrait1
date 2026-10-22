@@ -1,0 +1,19 @@
+# Runtime dependencies for the ONNX Runtime inference path.
+# We intentionally avoid the repository's optional TensorRT and audio extras.
+torch==2.1.2
+torchvision==0.16.2
+numpy<2
+onnx
+onnxruntime==1.17.0  # CPU execution provider: upstream notes GPU ORT lacks required 5D grid_sample support
+opencv-python-headless
+omegaconf
+ffmpeg-python
+huggingface_hub
+scikit-image
+insightface
+torchgeometry
+mediapipe
+munch
+tqdm
+colorama
+Pillow
