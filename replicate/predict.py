@@ -6,6 +6,8 @@ It does not claim to provide continuous live-camera streaming.
 from pathlib import Path as LocalPath
 import os
 import subprocess
+
+import cv2
 import tempfile
 
 from cog import BaseRunner, Input, Path
@@ -53,11 +55,57 @@ class Runner(BaseRunner):
         driving_multiplier: float = Input(description="Motion strength (reserved for future pipeline support)", default=1.0, ge=0.1, le=3.0),
     ) -> Path:
         log("Prediction started.")
-        if not LocalPath(str(source_image)).is_file():
-            raise RuntimeError("The supplied source image is not readable.")
-        if not LocalPath(str(driving_video)).is_file():
-            raise RuntimeError("The supplied driving video is not readable.")
-        log("Input image and driving video are readable.")
+        source_path = LocalPath(str(source_image))
+        driving_path = LocalPath(str(driving_video))
+        if not source_path.is_file() or source_path.stat().st_size == 0:
+            raise RuntimeError("The supplied source image is missing, empty, or unreadable.")
+        if not driving_path.is_file() or driving_path.stat().st_size == 0:
+            raise RuntimeError("The supplied driving video is missing, empty, or unreadable.")
+
+        # Fail early on malformed uploads rather than spending GPU time in inference.
+        image = cv2.imread(str(source_path), cv2.IMREAD_COLOR)
+        if image is None or image.size == 0:
+            raise RuntimeError(
+                "The source_image could not be decoded as an image. Upload a valid JPG or PNG portrait."
+            )
+        image_height, image_width = image.shape[:2]
+        if image_width < 64 or image_height < 64:
+            raise RuntimeError(
+                f"The source image is too small ({image_width}x{image_height}); use an image at least 64x64."
+            )
+        del image
+        log(f"Source image validated ({image_width}x{image_height}).")
+
+        capture = cv2.VideoCapture(str(driving_path))
+        try:
+            if not capture.isOpened():
+                raise RuntimeError(
+                    "The driving_video could not be opened. Upload a supported video such as MP4 (H.264)."
+                )
+            video_fps = capture.get(cv2.CAP_PROP_FPS)
+            frame_count = capture.get(cv2.CAP_PROP_FRAME_COUNT)
+            ok, first_frame = capture.read()
+            if not ok or first_frame is None or first_frame.size == 0:
+                raise RuntimeError(
+                    "The driving_video opened but no readable frame was found. Try a different video file."
+                )
+            frame_height, frame_width = first_frame.shape[:2]
+            if frame_width < 64 or frame_height < 64:
+                raise RuntimeError(
+                    f"The driving video frame is too small ({frame_width}x{frame_height}); use video at least 64x64."
+                )
+            if video_fps <= 0:
+                raise RuntimeError(
+                    "The driving video has no usable frame-rate metadata. Re-export it as a standard MP4 video."
+                )
+            if frame_count > 0 and frame_count < 2:
+                raise RuntimeError("The driving video must contain at least two frames.")
+        finally:
+            capture.release()
+        log(
+            f"Driving video validated ({frame_width}x{frame_height}, "
+            f"{video_fps:.2f} FPS, reported frames={int(frame_count) if frame_count > 0 else 'unknown'})."
+        )
 
         RESULTS_DIR.mkdir(parents=True, exist_ok=True)
         before = set(RESULTS_DIR.rglob("*-org.mp4"))
@@ -147,5 +195,23 @@ class Runner(BaseRunner):
             raise RuntimeError(
                 "Output FPS normalization failed. FFmpeg output follows:\n" + details
             )
+
+        # Confirm the normalized file is a decodable video before returning it.
+        result_capture = cv2.VideoCapture(str(normalized_output))
+        try:
+            if not result_capture.isOpened():
+                raise RuntimeError("FPS normalization produced a file that OpenCV cannot open.")
+            result_ok, result_frame = result_capture.read()
+            if not result_ok or result_frame is None or result_frame.size == 0:
+                raise RuntimeError("FPS normalization produced a video with no readable frames.")
+            result_width = int(result_capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+            result_height = int(result_capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            result_frame_count = int(result_capture.get(cv2.CAP_PROP_FRAME_COUNT))
+        finally:
+            result_capture.release()
+        log(
+            f"Output validated ({result_width}x{result_height}, "
+            f"reported frames={result_frame_count}, bytes={normalized_output.stat().st_size})."
+        )
         log(f"Prediction finished successfully. Returning {normalized_output.name}.")
         return Path(str(normalized_output))
