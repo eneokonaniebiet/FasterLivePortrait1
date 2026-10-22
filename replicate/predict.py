@@ -6,11 +6,11 @@ It does not claim to provide continuous live-camera streaming.
 from pathlib import Path as LocalPath
 import os
 import subprocess
-import time
-from typing import Optional
+import tempfile
 
 from cog import BaseRunner, Input, Path
 from huggingface_hub import snapshot_download
+from omegaconf import OmegaConf
 
 
 ROOT = LocalPath(__file__).resolve().parent.parent
@@ -29,7 +29,7 @@ class Runner(BaseRunner):
             snapshot_download(
                 repo_id=WEIGHTS_REPO,
                 local_dir=str(CHECKPOINT_DIR),
-                local_dir_use_symlinks=False,
+                allow_patterns=["liveportrait_onnx/*"],
             )
         if not required.exists():
             raise RuntimeError(
@@ -44,9 +44,8 @@ class Runner(BaseRunner):
         fps: int = Input(description="Output FPS (reserved for future output normalization)", default=30, ge=1, le=60),
         driving_multiplier: float = Input(description="Motion strength (reserved for future pipeline support)", default=1.0, ge=0.1, le=3.0),
     ) -> Path:
-        # The upstream command currently derives FPS from the driving video and
-        # does not expose driving_multiplier. Keep the input schema compatible,
-        # but do not silently claim these options are applied.
+        # Use a temporary copy of the upstream config so motion strength is
+        # applied without mutating the repository's default config.
         if not LocalPath(str(source_image)).is_file():
             raise RuntimeError("The supplied source image is not readable.")
         if not LocalPath(str(driving_video)).is_file():
@@ -54,22 +53,34 @@ class Runner(BaseRunner):
 
         RESULTS_DIR.mkdir(parents=True, exist_ok=True)
         before = set(RESULTS_DIR.rglob("*-org.mp4"))
+        inference_config = OmegaConf.load(str(CONFIG))
+        inference_config.infer_params.driving_multiplier = float(driving_multiplier)
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as config_file:
+            temp_config_path = config_file.name
+            OmegaConf.save(inference_config, temp_config_path)
+
         command = [
             "python",
             str(ROOT / "run.py"),
             "--src_image", str(source_image),
             "--dri_video", str(driving_video),
-            "--cfg", str(CONFIG),
+            "--cfg", temp_config_path,
             "--paste_back",
         ]
-        completed = subprocess.run(
-            command,
-            cwd=str(ROOT),
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            timeout=60 * 60,
-        )
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=str(ROOT),
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                timeout=60 * 60,
+            )
+        finally:
+            try:
+                os.unlink(temp_config_path)
+            except OSError:
+                pass
         if completed.returncode != 0:
             raise RuntimeError(
                 "FasterLivePortrait inference failed. Last output:\n"
@@ -89,4 +100,21 @@ class Runner(BaseRunner):
         output = max(candidates, key=lambda p: p.stat().st_mtime)
         if output.stat().st_size == 0:
             raise RuntimeError("Inference produced an empty output video.")
-        return Path(str(output))
+
+        normalized_output = output.with_name(output.stem + f"-{int(fps)}fps.mp4")
+        normalize = subprocess.run(
+            [
+                "ffmpeg", "-y", "-i", str(output),
+                "-vf", f"fps={int(fps)}",
+                "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                str(normalized_output),
+            ],
+            cwd=str(ROOT),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=60 * 20,
+        )
+        if normalize.returncode != 0 or not normalized_output.exists() or normalized_output.stat().st_size == 0:
+            raise RuntimeError("Output FPS normalization failed:\\n" + normalize.stdout[-8000:])
+        return Path(str(normalized_output))
